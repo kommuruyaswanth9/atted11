@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: attendance-tracker
+    runtime: node
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: NODE_ENV
+        value: production
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        value: "Attendance Tracker <onboarding@resend.dev>"
+      - key: OTP_EMAIL
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
