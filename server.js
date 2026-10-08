@@ -273,46 +273,12 @@ app.post('/api/verify-otp', async (req, res) => {
 });
 
 app.post('/api/send-report', async (req, res) => {
-  if (!BREVO_API_KEY || !BREVO_SENDER_EMAIL || !ADMIN_EMAIL) return res.status(500).json({ error: 'Email reporting is not configured.' });
+  // Attendance reports are no longer emailed to the administrator.
+  // The only administrator email is the Student Verified email sent
+  // after successful OTP verification.
   const user = authenticatedUser(req);
   if (!user) return res.status(401).json({ error: 'Not authenticated.' });
-
-  const attendance = req.body?.attendance;
-  if (!attendance || typeof attendance !== 'object') {
-    return res.status(400).json({ error: 'Attendance report data is missing.' });
-  }
-
-  const rows = [];
-  let present = 0, absent = 0, holidays = 0;
-  for (const [date, entries] of Object.entries(attendance)) {
-    if (!entries || typeof entries !== 'object') continue;
-    for (const [session, status] of Object.entries(entries)) {
-      const safeStatus = cleanText(status, 20);
-      if (!['present','absent','holiday'].includes(safeStatus)) continue;
-      if (safeStatus === 'present') present++;
-      else if (safeStatus === 'absent') absent++;
-      else holidays++;
-      rows.push(`<tr><td>${escapeHtml(date)}</td><td>${escapeHtml(session)}</td><td>${escapeHtml(safeStatus)}</td></tr>`);
-    }
-  }
-
-  try {
-    await sendBrevoEmail({
-      to: ADMIN_EMAIL,
-      subject: `Attendance Report - ${user.name} - ${user.rollNumber}`,
-      html: `
-        <div style="font-family:Arial,sans-serif;max-width:760px;margin:auto;padding:28px;color:#172033">
-          <h2>Attendance Tracker — Complete Report</h2>
-          <p><strong>Name:</strong> ${escapeHtml(user.name)}<br><strong>Roll Number:</strong> ${escapeHtml(user.rollNumber)}<br><strong>Phone:</strong> ${escapeHtml(user.phone)}<br><strong>Email:</strong> ${escapeHtml(user.email || "")}</p>
-          <p><strong>Present:</strong> ${present} &nbsp; <strong>Absent:</strong> ${absent} &nbsp; <strong>Holidays:</strong> ${holidays}</p>
-          <table style="border-collapse:collapse;width:100%"><thead><tr><th style="border:1px solid #ddd;padding:8px;text-align:left">Date</th><th style="border:1px solid #ddd;padding:8px;text-align:left">Session</th><th style="border:1px solid #ddd;padding:8px;text-align:left">Status</th></tr></thead><tbody>${rows.join('') || '<tr><td colspan="3" style="padding:8px">No attendance records have been saved yet.</td></tr>'}</tbody></table>
-        </div>`
-    });
-    return res.json({ success: true });
-  } catch (err) {
-    logBrevoError('Attendance report email', err);
-    return res.status(502).json({ error: 'Could not send the attendance report.' });
-  }
+  return res.json({ success: true, emailed: false });
 });
 
 app.get('/api/session', (req, res) => {
