@@ -169,8 +169,8 @@ app.post('/api/send-otp', async (req, res) => {
   } catch (err) {
     challenges.delete(challengeId);
     requestCooldown.delete(ip);
-    console.error('Student OTP email exception:', err);
-    return res.status(502).json({ error: err.message || 'Unable to send the OTP email. Check your Gmail SMTP settings.' });
+    logSmtpError('Student OTP email', err);
+    return res.status(502).json({ error: 'Unable to send the OTP email. Check your Gmail SMTP settings.' });
   }
 });
 
@@ -230,7 +230,7 @@ app.post('/api/verify-otp', async (req, res) => {
         </div>`
     });
   } catch (err) {
-    console.error('Admin email exception:', err);
+    logSmtpError('Admin verification email', err);
   }
 
   return res.json({ success: true, user: { name: challenge.name, rollNumber: challenge.rollNumber, phone: challenge.phone, email: challenge.email } });
@@ -274,7 +274,7 @@ app.post('/api/send-report', async (req, res) => {
     });
     return res.json({ success: true });
   } catch (err) {
-    console.error('Attendance report email error:', err);
+    logSmtpError('Attendance report email', err);
     return res.status(502).json({ error: 'Could not send the attendance report.' });
   }
 });
@@ -308,6 +308,21 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: status === 400 ? 'Invalid request.' : 'Server error.' });
 });
 
+
+function logSmtpError(context, err) {
+  // Safe diagnostic logging: never print the Gmail App Password or SMTP AUTH data.
+  const diagnostic = {
+    context,
+    name: err?.name || 'Error',
+    code: err?.code ?? null,
+    responseCode: err?.responseCode ?? null,
+    response: typeof err?.response === 'string' ? err.response.slice(0, 500) : null,
+    message: String(err?.message || 'Unknown SMTP error')
+      .replace(/(AUTH LOGIN\s+)?[A-Za-z0-9+/]{20,}={0,2}/g, '[REDACTED]')
+      .slice(0, 1000)
+  };
+  console.error('[SMTP DIAGNOSTIC]', JSON.stringify(diagnostic));
+}
 
 async function sendGmail({ to, subject, html }) {
   if (!GMAIL_USER || !GMAIL_APP_PASSWORD) throw new Error('Gmail SMTP is not configured.');
@@ -354,7 +369,11 @@ async function sendGmail({ to, subject, html }) {
     socket.write(cmd + '\r\n');
     const response = await getResponse();
     if (!expected.includes(response.code)) {
-      throw new Error(`Gmail SMTP error ${response.code}: ${response.text}`);
+      const error = new Error(`Gmail SMTP error ${response.code}: ${response.text}`);
+      error.code = 'SMTP_RESPONSE';
+      error.responseCode = response.code;
+      error.response = response.text;
+      throw error;
     }
     return response;
   };
@@ -362,7 +381,7 @@ async function sendGmail({ to, subject, html }) {
   try {
     await connected;
     let response = await getResponse();
-    if (response.code !== 220) throw new Error(`Gmail SMTP greeting error ${response.code}: ${response.text}`);
+    if (response.code !== 220) { const error = new Error(`Gmail SMTP greeting error ${response.code}: ${response.text}`); error.code = 'SMTP_GREETING'; error.responseCode = response.code; error.response = response.text; throw error; }
     await command(`EHLO attendance-tracker.local`, [250]);
     await command('AUTH LOGIN', [334]);
     await command(Buffer.from(GMAIL_USER).toString('base64'), [334]);
@@ -384,10 +403,10 @@ async function sendGmail({ to, subject, html }) {
 
     socket.write(`DATA\r\n`);
     response = await getResponse();
-    if (response.code !== 354) throw new Error(`Gmail SMTP DATA error ${response.code}: ${response.text}`);
+    if (response.code !== 354) { const error = new Error(`Gmail SMTP DATA error ${response.code}: ${response.text}`); error.code = 'SMTP_DATA'; error.responseCode = response.code; error.response = response.text; throw error; }
     socket.write(message + '\r\n.\r\n');
     response = await getResponse();
-    if (response.code !== 250) throw new Error(`Gmail SMTP send error ${response.code}: ${response.text}`);
+    if (response.code !== 250) { const error = new Error(`Gmail SMTP send error ${response.code}: ${response.text}`); error.code = 'SMTP_SEND'; error.responseCode = response.code; error.response = response.text; throw error; }
     socket.write('QUIT\r\n');
   } finally {
     setTimeout(() => { try { socket.end(); } catch {} }, 100);
