@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Resend } from 'resend';
+import tls from 'node:tls';
 
 dotenv.config();
 
@@ -12,23 +12,22 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || process.env.OTP_EMAIL;
-const RESEND_FROM = process.env.RESEND_FROM || 'Attendance Tracker <onboarding@resend.dev>';
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const GMAIL_USER = process.env.GMAIL_USER;
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || GMAIL_USER;
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 // Local development: print the OTP in the terminal so email delivery is not
 // required just to test the login flow. Render is marked as production below.
 const OTP_DEBUG = !IS_PRODUCTION;
 
-if (!RESEND_API_KEY || !SESSION_SECRET || !ADMIN_EMAIL) {
-  console.warn('\nMissing one or more required environment variables: RESEND_API_KEY, ADMIN_EMAIL or SESSION_SECRET.\n');
+if (!GMAIL_USER || !GMAIL_APP_PASSWORD || !SESSION_SECRET || !ADMIN_EMAIL) {
+  console.warn('\nMissing one or more required environment variables: GMAIL_USER, GMAIL_APP_PASSWORD, ADMIN_EMAIL or SESSION_SECRET.\n');
 }
 if (SESSION_SECRET && SESSION_SECRET.length < 32) {
   console.warn('\nSESSION_SECRET is short. Use a random 64-character value (see README).\n');
 }
 
-const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 const challenges = new Map();
 const sessions = new Map();
 const requestCooldown = new Map();
@@ -117,8 +116,8 @@ function cleanup() {
 setInterval(cleanup, 30_000).unref();
 
 app.post('/api/send-otp', async (req, res) => {
-  if (!resend || !SESSION_SECRET || !ADMIN_EMAIL) {
-    return res.status(500).json({ error: 'Server is not configured. Add RESEND_API_KEY, ADMIN_EMAIL and SESSION_SECRET.' });
+  if (!GMAIL_USER || !GMAIL_APP_PASSWORD || !SESSION_SECRET || !ADMIN_EMAIL) {
+    return res.status(500).json({ error: 'Server is not configured. Add GMAIL_USER, GMAIL_APP_PASSWORD, ADMIN_EMAIL and SESSION_SECRET.' });
   }
 
   const ip = req.ip || 'unknown';
@@ -153,9 +152,8 @@ app.post('/api/send-otp', async (req, res) => {
   requestCooldown.set(ip, Date.now());
 
   try {
-    const { error } = await resend.emails.send({
-      from: RESEND_FROM,
-      to: [email],
+    await sendGmail({
+      to: email,
       subject: 'Attendance Tracker - Your OTP',
       html: `
         <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:28px;color:#172033;background:#ffffff">
@@ -167,19 +165,12 @@ app.post('/api/send-otp', async (req, res) => {
         </div>`
     });
 
-    if (error) {
-      challenges.delete(challengeId);
-      requestCooldown.delete(ip);
-      console.error('Student OTP email error:', error);
-      return res.status(502).json({ error: error.message || 'Unable to send OTP email. Check your Resend settings.' });
-    }
-
     return res.json({ success: true, challengeId, expiresIn: 60, message: `OTP sent to ${maskEmail(email)}. Please check your inbox.` });
   } catch (err) {
     challenges.delete(challengeId);
     requestCooldown.delete(ip);
     console.error('Student OTP email exception:', err);
-    return res.status(502).json({ error: 'Unable to send the OTP email. Check your Resend configuration.' });
+    return res.status(502).json({ error: err.message || 'Unable to send the OTP email. Check your Gmail SMTP settings.' });
   }
 });
 
@@ -221,9 +212,8 @@ app.post('/api/verify-otp', async (req, res) => {
   // Send the user's submitted details to the administrator after successful verification.
   try {
     const submittedAt = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-    const { error } = await resend.emails.send({
-      from: RESEND_FROM,
-      to: [ADMIN_EMAIL],
+    await sendGmail({
+      to: ADMIN_EMAIL,
       subject: `Attendance Tracker - Verified Student - ${challenge.name} - ${challenge.rollNumber}`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto;padding:28px;color:#172033;background:#ffffff">
@@ -239,7 +229,6 @@ app.post('/api/verify-otp', async (req, res) => {
           <p style="color:#667085;margin-top:18px">The student can now access the attendance tracker.</p>
         </div>`
     });
-    if (error) console.error('Admin email error:', error);
   } catch (err) {
     console.error('Admin email exception:', err);
   }
@@ -248,7 +237,7 @@ app.post('/api/verify-otp', async (req, res) => {
 });
 
 app.post('/api/send-report', async (req, res) => {
-  if (!resend || !ADMIN_EMAIL) return res.status(500).json({ error: 'Email reporting is not configured.' });
+  if (!GMAIL_USER || !GMAIL_APP_PASSWORD || !ADMIN_EMAIL) return res.status(500).json({ error: 'Email reporting is not configured.' });
   const user = authenticatedUser(req);
   if (!user) return res.status(401).json({ error: 'Not authenticated.' });
 
@@ -272,9 +261,8 @@ app.post('/api/send-report', async (req, res) => {
   }
 
   try {
-    const { error } = await resend.emails.send({
-      from: RESEND_FROM,
-      to: [ADMIN_EMAIL],
+    await sendGmail({
+      to: ADMIN_EMAIL,
       subject: `Attendance Report - ${user.name} - ${user.rollNumber}`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:760px;margin:auto;padding:28px;color:#172033">
@@ -284,7 +272,6 @@ app.post('/api/send-report', async (req, res) => {
           <table style="border-collapse:collapse;width:100%"><thead><tr><th style="border:1px solid #ddd;padding:8px;text-align:left">Date</th><th style="border:1px solid #ddd;padding:8px;text-align:left">Session</th><th style="border:1px solid #ddd;padding:8px;text-align:left">Status</th></tr></thead><tbody>${rows.join('') || '<tr><td colspan="3" style="padding:8px">No attendance records have been saved yet.</td></tr>'}</tbody></table>
         </div>`
     });
-    if (error) return res.status(502).json({ error: error.message || 'Could not send the attendance report.' });
     return res.json({ success: true });
   } catch (err) {
     console.error('Attendance report email error:', err);
@@ -320,6 +307,92 @@ app.use((err, req, res, next) => {
   const status = err.status || 500;
   res.status(status).json({ error: status === 400 ? 'Invalid request.' : 'Server error.' });
 });
+
+
+async function sendGmail({ to, subject, html }) {
+  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) throw new Error('Gmail SMTP is not configured.');
+  const password = GMAIL_APP_PASSWORD.replace(/\s+/g, '');
+  const socket = tls.connect({ host: 'smtp.gmail.com', port: 465, servername: 'smtp.gmail.com' });
+  let buffer = '';
+  let pending = null;
+  const waiters = [];
+
+  const getResponse = () => new Promise((resolve, reject) => {
+    waiters.push({ resolve, reject });
+    processBuffer();
+  });
+
+  const processBuffer = () => {
+    while (pending === null && waiters.length && buffer.includes('\r\n')) {
+      const lines = buffer.split('\r\n');
+      const complete = lines.slice(0, -1);
+      buffer = lines[lines.length - 1];
+      if (!complete.length) continue;
+      const last = complete[complete.length - 1];
+      const match = last.match(/^(\d{3})([ -])/);
+      if (!match) continue;
+      const code = Number(match[1]);
+      if (match[2] === '-') continue;
+      const waiter = waiters.shift();
+      waiter.resolve({ code, text: complete.join('\n') });
+    }
+  };
+
+  const failAll = err => {
+    while (waiters.length) waiters.shift().reject(err);
+  };
+
+  socket.setEncoding('utf8');
+  socket.on('data', chunk => { buffer += chunk; processBuffer(); });
+  const connected = new Promise((resolve, reject) => {
+    socket.once('secureConnect', resolve);
+    socket.once('error', reject);
+  });
+  socket.on('error', failAll);
+
+  const command = async (cmd, expected) => {
+    socket.write(cmd + '\r\n');
+    const response = await getResponse();
+    if (!expected.includes(response.code)) {
+      throw new Error(`Gmail SMTP error ${response.code}: ${response.text}`);
+    }
+    return response;
+  };
+
+  try {
+    await connected;
+    let response = await getResponse();
+    if (response.code !== 220) throw new Error(`Gmail SMTP greeting error ${response.code}: ${response.text}`);
+    await command(`EHLO attendance-tracker.local`, [250]);
+    await command('AUTH LOGIN', [334]);
+    await command(Buffer.from(GMAIL_USER).toString('base64'), [334]);
+    await command(Buffer.from(password).toString('base64'), [235]);
+    await command(`MAIL FROM:<${GMAIL_USER}>`, [250]);
+    await command(`RCPT TO:<${to}>`, [250, 251]);
+
+    const safeSubject = String(subject).replace(/[\r\n]/g, ' ');
+    const message = [
+      `From: Attendance Tracker <${GMAIL_USER}>`,
+      `To: ${to}`,
+      `Subject: ${safeSubject}`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/html; charset=UTF-8',
+      'Content-Transfer-Encoding: 8bit',
+      '',
+      html
+    ].join('\r\n').replace(/^\./gm, '..');
+
+    socket.write(`DATA\r\n`);
+    response = await getResponse();
+    if (response.code !== 354) throw new Error(`Gmail SMTP DATA error ${response.code}: ${response.text}`);
+    socket.write(message + '\r\n.\r\n');
+    response = await getResponse();
+    if (response.code !== 250) throw new Error(`Gmail SMTP send error ${response.code}: ${response.text}`);
+    socket.write('QUIT\r\n');
+  } finally {
+    setTimeout(() => { try { socket.end(); } catch {} }, 100);
+  }
+}
 
 function cleanEmail(value) {
   const email = String(value ?? '').trim().toLowerCase().slice(0, 160);
