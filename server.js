@@ -3,7 +3,6 @@ import dotenv from 'dotenv';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import tls from 'node:tls';
 
 dotenv.config();
 
@@ -12,17 +11,18 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const GMAIL_USER = process.env.GMAIL_USER;
-const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || GMAIL_USER;
+const BREVO_API_KEY = process.env.BREVO_API_KEY;
+const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL;
+const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || 'Attendance Tracker';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 // Local development: print the OTP in the terminal so email delivery is not
 // required just to test the login flow. Render is marked as production below.
 const OTP_DEBUG = !IS_PRODUCTION;
 
-if (!GMAIL_USER || !GMAIL_APP_PASSWORD || !SESSION_SECRET || !ADMIN_EMAIL) {
-  console.warn('\nMissing one or more required environment variables: GMAIL_USER, GMAIL_APP_PASSWORD, ADMIN_EMAIL or SESSION_SECRET.\n');
+if (!BREVO_API_KEY || !BREVO_SENDER_EMAIL || !SESSION_SECRET || !ADMIN_EMAIL) {
+  console.warn('\nMissing one or more required environment variables: BREVO_API_KEY, BREVO_SENDER_EMAIL, ADMIN_EMAIL or SESSION_SECRET.\n');
 }
 if (SESSION_SECRET && SESSION_SECRET.length < 32) {
   console.warn('\nSESSION_SECRET is short. Use a random 64-character value (see README).\n');
@@ -31,6 +31,14 @@ if (SESSION_SECRET && SESSION_SECRET.length < 32) {
 const challenges = new Map();
 const sessions = new Map();
 const requestCooldown = new Map();
+
+// Brevo Free allows 300 email sends per day. This counter is intentionally
+// kept in memory so the app can warn/block before making another API call.
+// It resets at midnight IST. Brevo remains the final authority on delivery.
+const DAILY_EMAIL_LIMIT = 300;
+const EMAIL_WARNING_1 = 250;
+const EMAIL_WARNING_2 = 280;
+let emailUsage = { date: istDateKey(), sent: 0 };
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1); // correct client IP + secure cookies behind Render/Railway/Nginx etc.
@@ -116,8 +124,16 @@ function cleanup() {
 setInterval(cleanup, 30_000).unref();
 
 app.post('/api/send-otp', async (req, res) => {
-  if (!GMAIL_USER || !GMAIL_APP_PASSWORD || !SESSION_SECRET || !ADMIN_EMAIL) {
-    return res.status(500).json({ error: 'Server is not configured. Add GMAIL_USER, GMAIL_APP_PASSWORD, ADMIN_EMAIL and SESSION_SECRET.' });
+  if (!BREVO_API_KEY || !BREVO_SENDER_EMAIL || !SESSION_SECRET || !ADMIN_EMAIL) {
+    return res.status(500).json({ error: 'Server is not configured. Add BREVO_API_KEY, BREVO_SENDER_EMAIL, ADMIN_EMAIL and SESSION_SECRET.' });
+  }
+
+  const usageBeforeSend = getEmailUsage();
+  if (usageBeforeSend.sent >= DAILY_EMAIL_LIMIT) {
+    return res.status(429).json({
+      error: `🚫 Daily email limit reached (${DAILY_EMAIL_LIMIT}/${DAILY_EMAIL_LIMIT}). New OTP emails cannot be sent right now. Please try again after today’s Brevo limit resets.`,
+      emailUsage: usageBeforeSend
+    });
   }
 
   const ip = req.ip || 'unknown';
@@ -152,7 +168,16 @@ app.post('/api/send-otp', async (req, res) => {
   requestCooldown.set(ip, Date.now());
 
   try {
-    await sendGmail({
+    // Put the warning INSIDE the normal OTP email when we are approaching
+    // the daily limit. This does not create another email and therefore
+    // does not consume another Brevo send.
+    const projectedSendCount = getEmailUsage().sent + 1;
+    const emailWarning = emailLimitWarning(projectedSendCount);
+    const warningHtml = emailWarning
+      ? `<div style="margin-top:18px;padding:14px 16px;border-radius:10px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412"><strong>${escapeHtml(emailWarning)}</strong></div>`
+      : '';
+
+    await sendBrevoEmail({
       to: email,
       subject: 'Attendance Tracker - Your OTP',
       html: `
@@ -162,15 +187,26 @@ app.post('/api/send-otp', async (req, res) => {
           <p>Your verification OTP is:</p>
           <div style="font-size:30px;font-weight:800;letter-spacing:8px;text-align:center;padding:18px;background:#f4f7fb;border-radius:12px">${otp}</div>
           <p>This OTP expires in <strong>1 minute</strong>. If you did not request it, you can ignore this email.</p>
+          ${warningHtml}
         </div>`
     });
 
-    return res.json({ success: true, challengeId, expiresIn: 60, message: `OTP sent to ${maskEmail(email)}. Please check your inbox.` });
+    const usage = getEmailUsage();
+    const warning = emailLimitWarning(usage.sent);
+    return res.json({
+      success: true,
+      challengeId,
+      expiresIn: 60,
+      message: warning
+        ? `OTP sent to ${maskEmail(email)}. Please check your inbox.\n\n${warning}`
+        : `OTP sent to ${maskEmail(email)}. Please check your inbox.`,
+      emailUsage: usage
+    });
   } catch (err) {
     challenges.delete(challengeId);
     requestCooldown.delete(ip);
-    logSmtpError('Student OTP email', err);
-    return res.status(502).json({ error: 'Unable to send the OTP email. Check your Gmail SMTP settings.' });
+    logBrevoError('Student OTP email', err);
+    return res.status(502).json({ error: 'Unable to send the OTP email through Brevo. Check your Brevo API key and verified sender email.' });
   }
 });
 
@@ -212,7 +248,7 @@ app.post('/api/verify-otp', async (req, res) => {
   // Send the user's submitted details to the administrator after successful verification.
   try {
     const submittedAt = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-    await sendGmail({
+    await sendBrevoEmail({
       to: ADMIN_EMAIL,
       subject: `Attendance Tracker - Verified Student - ${challenge.name} - ${challenge.rollNumber}`,
       html: `
@@ -230,14 +266,14 @@ app.post('/api/verify-otp', async (req, res) => {
         </div>`
     });
   } catch (err) {
-    logSmtpError('Admin verification email', err);
+    logBrevoError('Admin verification email', err);
   }
 
   return res.json({ success: true, user: { name: challenge.name, rollNumber: challenge.rollNumber, phone: challenge.phone, email: challenge.email } });
 });
 
 app.post('/api/send-report', async (req, res) => {
-  if (!GMAIL_USER || !GMAIL_APP_PASSWORD || !ADMIN_EMAIL) return res.status(500).json({ error: 'Email reporting is not configured.' });
+  if (!BREVO_API_KEY || !BREVO_SENDER_EMAIL || !ADMIN_EMAIL) return res.status(500).json({ error: 'Email reporting is not configured.' });
   const user = authenticatedUser(req);
   if (!user) return res.status(401).json({ error: 'Not authenticated.' });
 
@@ -261,7 +297,7 @@ app.post('/api/send-report', async (req, res) => {
   }
 
   try {
-    await sendGmail({
+    await sendBrevoEmail({
       to: ADMIN_EMAIL,
       subject: `Attendance Report - ${user.name} - ${user.rollNumber}`,
       html: `
@@ -274,7 +310,7 @@ app.post('/api/send-report', async (req, res) => {
     });
     return res.json({ success: true });
   } catch (err) {
-    logSmtpError('Attendance report email', err);
+    logBrevoError('Attendance report email', err);
     return res.status(502).json({ error: 'Could not send the attendance report.' });
   }
 });
@@ -309,108 +345,78 @@ app.use((err, req, res, next) => {
 });
 
 
-function logSmtpError(context, err) {
-  // Safe diagnostic logging: never print the Gmail App Password or SMTP AUTH data.
+function istDateKey() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+}
+
+function getEmailUsage() {
+  const today = istDateKey();
+  if (emailUsage.date !== today) emailUsage = { date: today, sent: 0 };
+  return { date: emailUsage.date, sent: emailUsage.sent, limit: DAILY_EMAIL_LIMIT, remaining: Math.max(0, DAILY_EMAIL_LIMIT - emailUsage.sent) };
+}
+
+function emailLimitWarning(sent) {
+  if (sent >= DAILY_EMAIL_LIMIT) {
+    return `🚫 Daily email limit reached (${DAILY_EMAIL_LIMIT}/${DAILY_EMAIL_LIMIT}). New OTP emails cannot be sent until the daily limit resets.`;
+  }
+  if (sent >= EMAIL_WARNING_2) {
+    return `⚠️ Email limit almost reached: ${sent}/${DAILY_EMAIL_LIMIT} emails used today. Only ${DAILY_EMAIL_LIMIT - sent} remain.`;
+  }
+  if (sent >= EMAIL_WARNING_1) {
+    return `⚠️ Email limit warning: ${sent}/${DAILY_EMAIL_LIMIT} emails used today. Only ${DAILY_EMAIL_LIMIT - sent} remain.`;
+  }
+  return '';
+}
+
+function logBrevoError(context, err) {
   const diagnostic = {
     context,
     name: err?.name || 'Error',
-    code: err?.code ?? null,
-    responseCode: err?.responseCode ?? null,
-    response: typeof err?.response === 'string' ? err.response.slice(0, 500) : null,
-    message: String(err?.message || 'Unknown SMTP error')
-      .replace(/(AUTH LOGIN\s+)?[A-Za-z0-9+/]{20,}={0,2}/g, '[REDACTED]')
-      .slice(0, 1000)
+    status: err?.status ?? null,
+    message: String(err?.message || 'Unknown Brevo API error').slice(0, 1000)
   };
-  console.error('[SMTP DIAGNOSTIC]', JSON.stringify(diagnostic));
+  console.error('[BREVO DIAGNOSTIC]', JSON.stringify(diagnostic));
 }
 
-async function sendGmail({ to, subject, html }) {
-  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) throw new Error('Gmail SMTP is not configured.');
-  const password = GMAIL_APP_PASSWORD.replace(/\s+/g, '');
-  const socket = tls.connect({ host: 'smtp.gmail.com', port: 465, servername: 'smtp.gmail.com' });
-  let buffer = '';
-  let pending = null;
-  const waiters = [];
+async function sendBrevoEmail({ to, subject, html }) {
+  if (!BREVO_API_KEY || !BREVO_SENDER_EMAIL) throw new Error('Brevo API is not configured.');
 
-  const getResponse = () => new Promise((resolve, reject) => {
-    waiters.push({ resolve, reject });
-    processBuffer();
-  });
-
-  const processBuffer = () => {
-    while (pending === null && waiters.length && buffer.includes('\r\n')) {
-      const lines = buffer.split('\r\n');
-      const complete = lines.slice(0, -1);
-      buffer = lines[lines.length - 1];
-      if (!complete.length) continue;
-      const last = complete[complete.length - 1];
-      const match = last.match(/^(\d{3})([ -])/);
-      if (!match) continue;
-      const code = Number(match[1]);
-      if (match[2] === '-') continue;
-      const waiter = waiters.shift();
-      waiter.resolve({ code, text: complete.join('\n') });
-    }
-  };
-
-  const failAll = err => {
-    while (waiters.length) waiters.shift().reject(err);
-  };
-
-  socket.setEncoding('utf8');
-  socket.on('data', chunk => { buffer += chunk; processBuffer(); });
-  const connected = new Promise((resolve, reject) => {
-    socket.once('secureConnect', resolve);
-    socket.once('error', reject);
-  });
-  socket.on('error', failAll);
-
-  const command = async (cmd, expected) => {
-    socket.write(cmd + '\r\n');
-    const response = await getResponse();
-    if (!expected.includes(response.code)) {
-      const error = new Error(`Gmail SMTP error ${response.code}: ${response.text}`);
-      error.code = 'SMTP_RESPONSE';
-      error.responseCode = response.code;
-      error.response = response.text;
-      throw error;
-    }
-    return response;
-  };
-
-  try {
-    await connected;
-    let response = await getResponse();
-    if (response.code !== 220) { const error = new Error(`Gmail SMTP greeting error ${response.code}: ${response.text}`); error.code = 'SMTP_GREETING'; error.responseCode = response.code; error.response = response.text; throw error; }
-    await command(`EHLO attendance-tracker.local`, [250]);
-    await command('AUTH LOGIN', [334]);
-    await command(Buffer.from(GMAIL_USER).toString('base64'), [334]);
-    await command(Buffer.from(password).toString('base64'), [235]);
-    await command(`MAIL FROM:<${GMAIL_USER}>`, [250]);
-    await command(`RCPT TO:<${to}>`, [250, 251]);
-
-    const safeSubject = String(subject).replace(/[\r\n]/g, ' ');
-    const message = [
-      `From: Attendance Tracker <${GMAIL_USER}>`,
-      `To: ${to}`,
-      `Subject: ${safeSubject}`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/html; charset=UTF-8',
-      'Content-Transfer-Encoding: 8bit',
-      '',
-      html
-    ].join('\r\n').replace(/^\./gm, '..');
-
-    socket.write(`DATA\r\n`);
-    response = await getResponse();
-    if (response.code !== 354) { const error = new Error(`Gmail SMTP DATA error ${response.code}: ${response.text}`); error.code = 'SMTP_DATA'; error.responseCode = response.code; error.response = response.text; throw error; }
-    socket.write(message + '\r\n.\r\n');
-    response = await getResponse();
-    if (response.code !== 250) { const error = new Error(`Gmail SMTP send error ${response.code}: ${response.text}`); error.code = 'SMTP_SEND'; error.responseCode = response.code; error.response = response.text; throw error; }
-    socket.write('QUIT\r\n');
-  } finally {
-    setTimeout(() => { try { socket.end(); } catch {} }, 100);
+  const usage = getEmailUsage();
+  if (usage.sent >= DAILY_EMAIL_LIMIT) {
+    const error = new Error(`Brevo daily email limit reached (${DAILY_EMAIL_LIMIT}).`);
+    error.code = 'BREVO_DAILY_LIMIT';
+    error.status = 429;
+    throw error;
   }
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'api-key': BREVO_API_KEY,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      sender: { name: BREVO_SENDER_NAME, email: BREVO_SENDER_EMAIL },
+      to: [{ email: to }],
+      subject: String(subject).replace(/[\r\n]/g, ' '),
+      htmlContent: html
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    const error = new Error(`Brevo API error ${response.status}: ${body.slice(0, 500)}`);
+    error.status = response.status;
+    error.code = 'BREVO_API_ERROR';
+    throw error;
+  }
+
+  emailUsage.sent += 1;
+  return response.json().catch(() => ({}));
 }
 
 function cleanEmail(value) {
