@@ -37,7 +37,7 @@ function updateOtpTimer(){
   }
 }
 
-function startOtpTimer(expiresIn=120){
+function startOtpTimer(expiresIn=OTP_TTL / 1000){
   otpExpiresAt=Date.now()+expiresIn*1000;
 
   clearInterval(otpTimerId);
@@ -102,7 +102,7 @@ async function requestOtp(){
     otpInput.value="";
 
     // 2-minute OTP timer
-    startOtpTimer(result.expiresIn || 120);
+    startOtpTimer(result.expiresIn || OTP_TTL / 1000);
 
     setLoginMessage(
       result.message || "OTP sent to your email address. Please check your inbox.",
