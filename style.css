@@ -37,10 +37,29 @@ button,select{font:inherit}.app{max-width:1400px;margin:auto;padding:34px 28px 7
 .login-card h1{margin:8px 0 6px;font-size:31px;letter-spacing:-.8px}.login-subtitle{margin:0 0 25px;color:var(--muted);font-size:13px;line-height:1.55}.login-form{text-align:left}.login-form label{display:block;margin-bottom:14px}.login-form label span{display:block;margin-bottom:7px;color:#dbe7f2;font-size:12px;font-weight:700}.login-form input,.otp-input{width:100%;padding:12px 13px;border-radius:11px;border:1px solid var(--line);outline:none;background:#090f1d;color:var(--text);font-size:13px}.login-form input:focus,.otp-input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(52,211,153,.08)}.login-primary{width:100%;border:0;border-radius:11px;padding:12px 14px;margin-top:5px;background:linear-gradient(90deg,var(--green),var(--teal));color:#03110c;font-weight:900;cursor:pointer;transition:.18s}.login-primary:hover{transform:translateY(-1px);filter:brightness(1.06)}.otp-panel{margin-top:20px;padding-top:20px;border-top:1px solid var(--line)}.otp-heading{font-size:17px;font-weight:850}.otp-panel p{color:var(--muted);font-size:12px;line-height:1.5}.otp-panel p strong{color:var(--cyan)}.demo-otp{margin:14px 0;padding:13px;border-radius:12px;border:1px dashed rgba(52,211,153,.35);background:rgba(52,211,153,.07);color:var(--cyan);font-size:22px;font-weight:900;letter-spacing:4px}.otp-input{text-align:center;letter-spacing:6px;font-size:20px;font-weight:800}.otp-resend{margin-top:9px;border:0;background:transparent;color:var(--cyan);font-size:12px;cursor:pointer}.login-message{min-height:18px;margin-top:9px;font-size:11px}.login-message.success{color:var(--green)}.login-message.error{color:var(--red)}.login-note{margin:20px 0 0;color:#66728c;font-size:10px;line-height:1.5}.user-profile{display:flex;align-items:center;gap:10px;padding:9px 13px;border:1px solid var(--line);border-radius:15px;background:rgba(13,18,34,.82);backdrop-filter:blur(16px);box-shadow:var(--shadow)}.user-avatar{width:32px;height:32px;display:grid;place-items:center;border-radius:10px;background:rgba(52,211,153,.1)}.user-profile strong{display:block;font-size:12px}.user-profile small{display:block;margin-top:2px;color:var(--muted);font-size:10px}
 
 /* Compact login title and card for OTP view */
+.login-card{
+  width:min(440px,100%);
+  max-width:440px;
+  box-sizing:border-box;
+}
+
+.otp-panel{
+  margin-top:16px;
+  padding-top:16px;
+}
+
 @media(max-width:560px){
+
+  .login-screen{
+    padding:12px;
+  }
+
   .login-card{
+    width:100%;
+    max-width:440px;
     padding:20px 18px;
-    max-height:calc(100vh - 20px);
+    border-radius:22px;
+    max-height:calc(100vh - 24px);
     overflow-y:auto;
   }
 
@@ -48,35 +67,61 @@ button,select{font:inherit}.app{max-width:1400px;margin:auto;padding:34px 28px 7
     font-size:23px;
     line-height:1.15;
     letter-spacing:-.5px;
-    margin:6px 0 8px;
+    margin:6px 0 7px;
   }
 
   .login-subtitle{
-    margin-bottom:18px;
+    margin-bottom:15px;
     font-size:12px;
   }
 
   .login-form label{
-    margin-bottom:11px;
+    margin-bottom:9px;
   }
 
   .login-form label span{
-    margin-bottom:6px;
+    margin-bottom:5px;
   }
 
   .login-form input,
   .otp-input{
-    padding:11px 12px;
+    padding:10px 12px;
   }
 
   .login-primary{
-    padding:11px 14px;
+    padding:10px 14px;
   }
 
   .otp-panel{
-    margin-top:16px;
-    padding-top:16px;
+    margin-top:13px;
+    padding-top:13px;
+  }
+
+  .otp-heading{
+    font-size:16px;
+  }
+
+  .otp-panel p{
+    margin:7px 0;
+    font-size:11px;
+  }
+
+  .demo-otp{
+    margin:10px 0;
+    padding:10px;
+    font-size:20px;
+  }
+
+  .otp-input{
+    font-size:18px;
+    letter-spacing:5px;
+  }
+
+  .login-note{
+    margin-top:14px;
+  }
+
+  .user-profile{
+    width:100%;
   }
 }
-
-@media(max-width:560px){.login-card{padding:26px 20px;border-radius:22px}.login-card h1{font-size:27px}.user-profile{width:100%}}
