@@ -1,72 +1,122 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Attendance Tracker For AI&DS-C</title>
+  <meta name="theme-color" content="#070b17">
+  <title>Attendance Tracker For AI&amp;DS-C</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
+  <!-- LOGIN SCREEN: icon removed -->
   <section class="login-screen" id="loginScreen">
     <div class="login-card">
-      <div class="login-icon">✓</div>
       <div class="eyebrow">SECURE STUDENT ACCESS</div>
-      <h1>Attendance Tracker For AI&DS-C</h1>
-      <p class="login-subtitle">Enter your name, roll number, phone number and email to verify your access.</p>
+
+      <h1>Attendance Tracker For AI&amp;DS-C</h1>
+      <p class="login-subtitle">
+        Enter your name, roll number, phone number and email to verify your access.
+      </p>
 
       <form id="studentForm" class="login-form">
         <label>
           <span>Name</span>
-          <input id="studentName" type="text" placeholder="Enter your name" autocomplete="name" required>
+          <input id="studentName" type="text"
+            placeholder="Enter your name" autocomplete="name" required>
         </label>
+
         <label>
           <span>Roll Number</span>
-          <input id="rollNumber" type="text" placeholder="Enter your roll number" autocomplete="off" required>
+          <input id="rollNumber" type="text"
+            placeholder="Enter your roll number" autocomplete="off" required>
         </label>
+
         <label>
           <span>Phone Number</span>
-          <input id="phoneNumber" type="tel" inputmode="numeric" placeholder="10-digit mobile number" autocomplete="tel" maxlength="10" required>
+          <input id="phoneNumber" type="tel" inputmode="numeric"
+            placeholder="10-digit mobile number" autocomplete="tel"
+            maxlength="10" pattern="[0-9]{10}" required>
         </label>
+
         <label>
           <span>Email</span>
-          <input id="emailAddress" type="email" placeholder="Enter your Gmail or email address" autocomplete="email" required>
+          <input id="emailAddress" type="email"
+            placeholder="Enter your Gmail or email address"
+            autocomplete="email" required>
         </label>
-        <button type="submit" class="login-primary">Continue &amp; Get OTP</button>
+
+        <button type="submit" class="login-primary">
+          Continue &amp; Get OTP
+        </button>
       </form>
 
       <div class="otp-panel" id="otpPanel" hidden>
         <div class="otp-heading">OTP Verification</div>
-        <p>Enter the 6-digit OTP sent to your email address. It expires in <strong id="otpTimer">02:00</strong>.</p>
-        <input id="otpInput" class="otp-input" type="text" inputmode="numeric" maxlength="6" placeholder="Enter OTP" autocomplete="one-time-code">
-        <button type="button" class="login-primary" id="verifyOtp">Verify OTP</button>
-        <button type="button" class="otp-resend" id="resendOtp">Resend OTP</button>
-        <div class="login-message" id="loginMessage"></div>
+        <p>
+          Enter the 6-digit OTP sent to your email address.
+          It expires in <strong id="otpTimer">02:00</strong>.
+        </p>
+
+        <input id="otpInput" class="otp-input" type="text"
+          inputmode="numeric" maxlength="6" pattern="[0-9]{6}"
+          placeholder="Enter OTP" autocomplete="one-time-code"
+          aria-label="Enter six-digit OTP">
+
+        <button type="button" class="login-primary" id="verifyOtp">
+          Verify OTP
+        </button>
+        <button type="button" class="otp-resend" id="resendOtp">
+          Resend OTP
+        </button>
+
+        <div class="login-message" id="loginMessage"
+          role="status" aria-live="polite"></div>
       </div>
 
-      <p class="login-note">A verification OTP is sent to your email address and is valid for 2 minute.</p>
+      <p class="login-note">
+        A verification OTP is sent to your email address and is valid for 2 minutes.
+      </p>
     </div>
   </section>
 
+  <!-- ATTENDANCE DASHBOARD -->
   <div class="app" id="attendanceApp" hidden>
     <header class="topbar">
       <div>
         <div class="eyebrow">COLLEGE ATTENDANCE</div>
-        <h1>Attendance Tracker For AI&DS-C</h1>
+        <h1>Attendance Tracker For AI&amp;DS-C</h1>
         <p>Track every class and lab using your actual weekly timetable.</p>
       </div>
+
       <div class="user-profile" aria-live="polite">
         <span class="user-avatar">👤</span>
-        <div><strong id="loggedUserName">Student</strong><small id="loggedUserRoll">Roll Number</small></div>
+        <div>
+          <strong id="loggedUserName">Student</strong>
+          <small id="loggedUserRoll">Roll Number</small>
+        </div>
         <button class="secondary" id="logoutBtn" type="button">Log out</button>
       </div>
     </header>
 
     <section class="stats">
-      <div class="stat"><span>Attendance</span><b id="attendancePct">0%</b><small id="attendanceSub">No classes recorded</small></div>
-      <div class="stat"><span>Present</span><b id="presentCount">0</b><small>periods attended</small></div>
-      <div class="stat"><span>Absent</span><b id="absentCount">0</b><small>periods missed</small></div>
-      <div class="stat"><span>Holidays</span><b id="holidayCount">0</b><small>excluded from percentage</small></div>
+      <div class="stat">
+        <span>Attendance</span><b id="attendancePct">0%</b>
+        <small id="attendanceSub">No classes recorded</small>
+      </div>
+      <div class="stat">
+        <span>Present</span><b id="presentCount">0</b>
+        <small>periods attended</small>
+      </div>
+      <div class="stat">
+        <span>Absent</span><b id="absentCount">0</b>
+        <small>periods missed</small>
+      </div>
+      <div class="stat">
+        <span>Holidays</span><b id="holidayCount">0</b>
+        <small>excluded from percentage</small>
+      </div>
     </section>
 
     <main class="grid">
@@ -77,16 +127,19 @@
             <p>Click a date to record that day's classes.</p>
           </div>
           <div class="calendar-nav">
-            <button id="prevMonth" aria-label="Previous month">‹</button>
-            <button id="todayBtn">Today</button>
-            <button id="nextMonth" aria-label="Next month">›</button>
+            <button id="prevMonth" type="button" aria-label="Previous month">‹</button>
+            <button id="todayBtn" type="button">Today</button>
+            <button id="nextMonth" type="button" aria-label="Next month">›</button>
           </div>
         </div>
+
         <div class="month-title" id="monthTitle"></div>
         <div class="weekdays">
-          <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+          <span>Sun</span><span>Mon</span><span>Tue</span>
+          <span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
         </div>
         <div class="calendar" id="calendar"></div>
+
         <div class="legend">
           <span><i class="dot present"></i>Present</span>
           <span><i class="dot absent"></i>Absent</span>
@@ -101,16 +154,18 @@
             <h2 id="selectedDateTitle">Select a date</h2>
             <p id="selectedDateSub">Choose a date from the calendar.</p>
           </div>
-          <button class="danger-outline" id="clearDay">Clear day</button>
+          <button class="danger-outline" id="clearDay" type="button">Clear day</button>
         </div>
+
         <div id="dayContent"></div>
+
         <div class="day-controls">
-          <button class="day-nav" id="prevDay">‹ Previous Day</button>
+          <button class="day-nav" id="prevDay" type="button">‹ Previous Day</button>
           <div class="bulk-controls">
-            <button class="bulk-present" id="allPresent">✓ All Present</button>
-            <button class="bulk-absent" id="allAbsent">✕ All Absent</button>
+            <button class="bulk-present" id="allPresent" type="button">✓ All Present</button>
+            <button class="bulk-absent" id="allAbsent" type="button">✕ All Absent</button>
           </div>
-          <button class="day-nav" id="nextDay">Next Day ›</button>
+          <button class="day-nav" id="nextDay" type="button">Next Day ›</button>
         </div>
       </section>
     </main>
@@ -121,6 +176,7 @@
         <p id="monthlySummaryLabel">Attendance for the selected month.</p>
         <div class="month-summary" id="monthlySummary"></div>
       </section>
+
       <section class="card summary-card">
         <h2>Overall Attendance</h2>
         <p>Attendance across all recorded classes.</p>
@@ -139,7 +195,12 @@
       <p>Attendance calculated separately for each subject from your recorded classes.</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Subject</th><th>Present</th><th>Absent</th><th>Conducted</th><th>Attendance</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Subject</th><th>Present</th><th>Absent</th>
+              <th>Conducted</th><th>Attendance</th>
+            </tr>
+          </thead>
           <tbody id="subjectAttendanceBody"></tbody>
         </table>
       </div>
@@ -151,28 +212,42 @@
         <p>See what you need to do to reach your target.</p>
       </div>
       <div class="target-controls">
-        <label>Target
+        <label for="targetPct">Target
           <select id="targetPct">
-            <option>75</option><option selected>80</option><option>85</option><option>90</option>
+            <option>75</option><option selected>80</option>
+            <option>85</option><option>90</option>
           </select>%
         </label>
-        <div class="target-result" id="targetResult">Record some classes to see your target.</div>
+        <div class="target-result" id="targetResult">
+          Record some classes to see your target.
+        </div>
       </div>
     </section>
 
     <section class="card timetable-card">
       <div class="section-head">
-        <div><h2>Weekly Timetable</h2><p>Classes = 50 min (1 period). Labs = 100 min (2 periods).</p></div>
-        <button class="secondary" id="resetData">Reset all attendance</button>
+        <div>
+          <h2>Weekly Timetable</h2>
+          <p>Classes = 50 min (1 period). Labs = 100 min (2 periods).</p>
+        </div>
+        <button class="secondary" id="resetData" type="button">
+          Reset all attendance
+        </button>
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Day</th><th>Time</th><th>Subject</th><th>Type</th><th>Periods</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Day</th><th>Time</th><th>Subject</th>
+              <th>Type</th><th>Periods</th>
+            </tr>
+          </thead>
           <tbody id="timetableBody"></tbody>
         </table>
       </div>
     </section>
   </div>
+
   <script src="script.js"></script>
 </body>
 </html>
